@@ -13,6 +13,9 @@ tokio = "0.2.0-alpha.5"
 tokio-executor = "0.2.0-alpha.5"
 byteorder = "1"
 futures-preview = "=0.3.0-alpha.19"
+dnsclient = "*"
+lazy_static = "*"
+rand = "*"
 
 [patch.crates-io]
 tokio = { git = 'https://github.com/kingluo/tokio', branch = "patch-split" }
