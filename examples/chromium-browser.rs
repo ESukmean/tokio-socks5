@@ -5,7 +5,7 @@ use tokio_socks5::run_socks5;
 fn main() {
     let addr = env::args()
         .nth(1)
-        .unwrap_or("127.0.0.1:20002".to_string())
+        .unwrap_or("127.0.0.1:5005".to_string())
         .parse::<SocketAddr>()
         .unwrap();
 

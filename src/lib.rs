@@ -13,7 +13,7 @@ use tokio::prelude::*;
 use dnsclient::r#async::DNSClient;
 
 
-pub async fn dns_lookup(domain: &str) -> Result<std::net::Ipv4Addr>{
+pub async fn dns_lookup(host: String) -> Result<String>{
 	lazy_static!{
 		static ref DNS_OBJECT: DNSClient = {
 			let mut upstream = Vec::new();
@@ -27,15 +27,54 @@ pub async fn dns_lookup(domain: &str) -> Result<std::net::Ipv4Addr>{
 
 			dns
 		};
+
+		static ref GOOGLE_IP: [String; 3] = [
+			"216.58.197.238".to_string(),
+			"216.58.197.206".to_string(),
+			"216.58.197.174".to_string()
+		];
 	}
+	
+	/*
+		if 'google.com' in q_name or 'google.co.' in q_name or 'youtube.com' in q_name or 'googleapis.com' in q_name or 'gstatic.com' in q_name or 'googleusercontent.com' in q_name or 'google-analytics.com' in q_name or 'widevine.com' in q_name or 'blogger.com' in q_name or 'blogspot.' in q_name or 'ytimg.com' in q_name or 'ggpht.com' in q_name or 'recaptcha.net' in q_name:
+				
+		cnt_google = cnt_google + 1
+		
+		AResult = [q_name + " 136 A 216.58.197.238", q_name + " 136 A 216.58.197.206", q_name + " 136 A 216.58.197.174"]
+		random.shuffle(AResult)
+		
+	*/
+	
+
+
+	if 
+		host.contains("google.com") || host.contains("google.co.") || 
+		host.contains("youtube.com") || host.contains("ytimg.com") || host.contains("ggpht.com") || 
+		host.contains("googleapis.com") || host.contains("gstatic.com") || host.contains("googleusercontent.com") || 
+		host.contains("google-analytics.com") || host.contains("google.com") || 
+		host.contains("recaptcha.com") || 
+		host.contains("widevine.com") || 
+		host.contains("blogspot.com") || host.contains("blogspot.co.kr") || host.contains("blogger.com")
+	{
+		let mut rand_instance = rand::thread_rng();
+		let selected_ip = (*GOOGLE_IP)[rand_instance.gen_range(0, 2)].clone();
+
+		return Ok(selected_ip);
+	}
+	
 
 	let dns = (*DNS_OBJECT).clone();
-	let mut result = dns.query_a(domain).await?;
+	let mut result = dns.query_a(host.as_str()).await?;
+	
+	if result.len() == 1{
+		return Ok(result.pop().unwrap().to_string());
+	}
 
-	let mut rand = rand::thread_rng();
-	let pos = rand.gen_range(0, result.len() - 1);
+	let mut rand_instance = rand::thread_rng();
+	let pos = rand_instance.gen_range(0, result.len() - 1);
 
-	return Ok(result.remove(pos));
+
+	return Ok(result.remove(pos).to_string());
 }
 
 
@@ -162,9 +201,7 @@ async fn handle(mut stream: TcpStream, mut encoder: Option<Box<dyn Encoder>>) ->
 			}
 			let dst_port = BigEndian::read_u16(&buf[offset..]);
 
-			let mut dst_addr = std::str::from_utf8(&buf[5..offset]).unwrap().to_string();
-
-
+			let mut dst_addr = dns_lookup(std::str::from_utf8(&buf[5..offset]).unwrap().to_string()).await?;
 			dst_addr.push_str(":");
 			dst_addr.push_str(&dst_port.to_string());
 			addr = dst_addr;
