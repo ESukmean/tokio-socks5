@@ -9,6 +9,6 @@ fn main() {
         .parse::<SocketAddr>()
         .unwrap();
 
-    let rt = tokio::runtime::Builder::new().build().unwrap();
+    let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
     rt.block_on(run_socks5(addr, None)).unwrap();
 }

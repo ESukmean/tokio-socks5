@@ -1,7 +1,7 @@
 #[macro_use]
 extern crate lazy_static;
 use byteorder::{BigEndian, ByteOrder};
-use rand::{Rng, RngCore};
+use rand::Rng;
 
 use std::io;
 use std::io::Result;
@@ -28,9 +28,9 @@ pub async fn dns_lookup(host: String) -> Result<String>{
 		};
 
 		static ref GOOGLE_IP: [String; 3] = [
-			"216.58.197.238".to_string(),
-			"216.58.197.206".to_string(),
-			"216.58.197.174".to_string()
+			"34.64.4.113".to_string(),
+			"142.250.198.14".to_string(),
+			"142.250.199.110".to_string()
 		];
 	}
 	
@@ -73,7 +73,7 @@ pub async fn dns_lookup(host: String) -> Result<String>{
 	let pos = rand_instance.gen_range(0..result.len() - 1);
 
 
-	return Ok(result.remove(pos).to_string());
+	Ok(result.remove(pos).to_string())
 }
 
 
@@ -90,70 +90,32 @@ impl Clone for Box<dyn Encoder> {
 	}
 }
 
-async fn read<'a, T: AsyncRead + Unpin>(
-	s: &'a mut T,
-	encoder: &mut Option<Box<dyn Encoder>>,
-	buf: &'a mut [u8],
-) -> Result<usize> {
-	loop {
-		let sz = s.read(buf).await?;
-
-		if sz == 0 {
-			return Ok(sz);
-		}
-		match encoder {
-			Some(ref mut e) => {
-				let res = e.decode(buf, sz);
-				match res {
-					Ok(sz2) if sz2 == 0 => continue,
-					_ => return res,
-				}
-			}
-			None => return Ok(sz),
-		}
-	}
-}
-
-async fn write_all<'a, T: AsyncWrite + Unpin>(
-	s: &'a mut T,
-	encoder: &mut Option<Box<dyn Encoder>>,
-	buf: &'a [u8],
-) -> Result<()> {
-	let buf2 = match encoder {
-		Some(ref mut e) => e.encode(buf),
-		None => buf,
-	};
-	s.write_all(buf2).await?;
-	Ok(())
-}
-
 async fn copy<'a, T: AsyncRead + Unpin, U: AsyncWrite + Unpin>(
 	stream1: &'a mut T,
 	stream2: &'a mut U,
-	encoder1: &mut Option<Box<dyn Encoder>>,
-	encoder2: &mut Option<Box<dyn Encoder>>,
 ) -> io::Result<()> {
-	let mut buf = [0; 2048];
-	let len = read(stream1, encoder1, &mut buf).await?;
+	let mut buf = [0; 4096];
+	let len = stream1.read(&mut buf).await?;
 	if len == 0 {
 		return Err(io::Error::from(io::ErrorKind::BrokenPipe));
 	}
-	write_all(stream2, encoder2, &buf[..len]).await?;
+	
+	stream2.write_all( &buf[..len]).await?;
 	Ok(())
 }
 
-async fn handle(mut stream: TcpStream, mut encoder: Option<Box<dyn Encoder>>) -> Result<()> {
-	let mut buf = [0; 1024];
+async fn handle(mut stream: TcpStream) -> Result<()> {
+	let mut buf = [0; 2048];
 
-	let len = read(&mut stream, &mut encoder, &mut buf).await?;
-
+	let len = stream.read(&mut buf).await?;
+	
 	if 1 + 1 + (buf[1] as usize) != len || buf[0] != b'\x05' {
 		println!("invalid header");
 		return Ok(());
 	}
-	write_all(&mut stream, &mut encoder, b"\x05\x00").await?;
+	stream.write_all(b"\x05\x00").await?;
 
-	let len = read(&mut stream, &mut encoder, &mut buf).await?;
+	let len = stream.read(&mut buf).await?;
 	if len <= 4 {
 		println!("invalid proto");
 		return Ok(());
@@ -170,12 +132,7 @@ async fn handle(mut stream: TcpStream, mut encoder: Option<Box<dyn Encoder>>) ->
 
 	if cmd != 1 {
 		println!("Command not supported");
-		write_all(
-			&mut stream,
-			&mut encoder,
-			b"\x05\x07\x00\x01\x00\x00\x00\x00\x00\x00",
-		)
-		.await?;
+		stream.write_all(b"\x05\x07\x00\x01\x00\x00\x00\x00\x00\x00").await?;
 		return Ok(());
 	}
 
@@ -199,7 +156,7 @@ async fn handle(mut stream: TcpStream, mut encoder: Option<Box<dyn Encoder>>) ->
 			let dst_port = BigEndian::read_u16(&buf[offset..]);
 
 			let mut dst_addr = dns_lookup(std::str::from_utf8(&buf[5..offset]).unwrap().to_string()).await?;
-			dst_addr.push_str(":");
+			dst_addr.push(':');
 			dst_addr.push_str(&dst_port.to_string());
 			addr = dst_addr;
 		}
@@ -223,12 +180,7 @@ async fn handle(mut stream: TcpStream, mut encoder: Option<Box<dyn Encoder>>) ->
 		}
 		_ => {
 			println!("Address type not supported, type={}", atyp);
-			write_all(
-				&mut stream,
-				&mut encoder,
-				b"\x05\x08\x00\x01\x00\x00\x00\x00\x00\x00",
-			)
-			.await?;
+			stream.write_all(b"\x05\x08\x00\x01\x00\x00\x00\x00\x00\x00").await?;
 			return Ok(());
 		}
 	}
@@ -238,41 +190,26 @@ async fn handle(mut stream: TcpStream, mut encoder: Option<Box<dyn Encoder>>) ->
 		Ok(s) => s,
 		Err(e) => {
 			println!("Upstream connect failed, {}", e);
-			write_all(
-				&mut stream,
-				&mut encoder,
-				b"\x05\x01\x00\x01\x00\x00\x00\x00\x00\x00",
-			)
-			.await?;
+			stream.write_all(b"\x05\x01\x00\x01\x00\x00\x00\x00\x00\x00").await?;
 			return Ok(());
 		}
 	};
 
-	write_all(
-		&mut stream,
-		&mut encoder,
-		b"\x05\x00\x00\x01\x00\x00\x00\x00\x00\x00",
-	)
-	.await?;
+	stream.write_all(b"\x05\x00\x00\x01\x00\x00\x00\x00\x00\x00").await?;
 
 	let (mut ri, mut wi) = stream.split();
 	let (mut ro, mut wo) = up_stream.split();
 
-	let mut encoder2 = None;
-	let mut encoder4 = encoder.as_ref().map(|e| e.clone());
-	let mut encoder1 = encoder.as_ref().map(|e| e.clone());
-	let mut encoder3 = None;
-
 	loop {
 		tokio::select! {
 			_ = ro.readable() => {
-				if (copy(&mut ro, &mut wi, &mut encoder2, &mut encoder4)
+				if (copy(&mut ro, &mut wi)
 					.await).is_err() {
 						break
 					}
 			},
 			_ = ri.readable() => {
-				if (copy(&mut ri, &mut wo, &mut encoder1, &mut encoder3)
+				if (copy(&mut ri, &mut wo)
 				.await).is_err() {
 					break;
 				}
@@ -281,19 +218,18 @@ async fn handle(mut stream: TcpStream, mut encoder: Option<Box<dyn Encoder>>) ->
 	}
 
 	
-	return Ok(());
+	Ok(())
 }
 
-pub async fn run_socks5(addr: SocketAddr, encoder: Option<Box<dyn Encoder>>) -> Result<()> {
-	let mut listener = TcpListener::bind(&addr).await?;
+pub async fn run_socks5(addr: SocketAddr) -> Result<()> {
+	let listener = TcpListener::bind(&addr).await?;
 	println!("Listening on: {}", addr);
 
 	loop {
-		let encoder2 = encoder.as_ref().map(|e| e.clone());
 		let (stream, _) = listener.accept().await?;
 
 		tokio::spawn(async move {
-			handle(stream, encoder2).await.unwrap();
+			handle(stream).await.unwrap();
 		});
 	}
 }
