@@ -1,7 +1,7 @@
 [package]
-name = "tokio-socks5"
+name = "sgb-socks5"
 version = "0.1.0"
-authors = ["Jinhua Luo <home_king@163.com>"]
+authors = ["esukmean <esukmean@esukmean.com>"]
 edition = "2018"
 
 [lib]
@@ -9,13 +9,8 @@ name = "tokio_socks5"
 path = "src/lib.rs"
 
 [dependencies]
-tokio = "0.2.0-alpha.5"
-tokio-executor = "0.2.0-alpha.5"
+tokio = { version = "1", features=["full", "rt", "net"] }
 byteorder = "1"
-futures-preview = "=0.3.0-alpha.19"
 dnsclient = "*"
 lazy_static = "*"
 rand = "*"
-
-[patch.crates-io]
-tokio = { git = 'https://github.com/kingluo/tokio', branch = "patch-split" }

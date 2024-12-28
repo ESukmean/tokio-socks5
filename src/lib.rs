@@ -1,7 +1,7 @@
 #[macro_use]
 extern crate lazy_static;
 use byteorder::{BigEndian, ByteOrder};
-use rand::Rng;
+use rand::{Rng, RngCore};
 
 use std::io;
 use std::io::Result;
@@ -9,9 +9,8 @@ use std::net::SocketAddr;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use tokio::net::{TcpListener, TcpStream};
-use tokio::prelude::*;
 use dnsclient::r#async::DNSClient;
-
+use tokio::io::*;
 
 pub async fn dns_lookup(host: String) -> Result<String>{
 	lazy_static!{
@@ -57,7 +56,7 @@ pub async fn dns_lookup(host: String) -> Result<String>{
 		host.contains("blogspot.com") || host.contains("blogspot.co.kr") || host.contains("blogger.com")
 	{
 		let mut rand_instance = rand::thread_rng();
-		let selected_ip = (*GOOGLE_IP)[rand_instance.gen_range(0, 2)].clone();
+		let selected_ip = (*GOOGLE_IP)[rand_instance.gen_range(0..2)].clone();
 
 		return Ok(selected_ip);
 	}
@@ -71,7 +70,7 @@ pub async fn dns_lookup(host: String) -> Result<String>{
 	}
 
 	let mut rand_instance = rand::thread_rng();
-	let pos = rand_instance.gen_range(0, result.len() - 1);
+	let pos = rand_instance.gen_range(0..result.len() - 1);
 
 
 	return Ok(result.remove(pos).to_string());
@@ -134,14 +133,12 @@ async fn copy<'a, T: AsyncRead + Unpin, U: AsyncWrite + Unpin>(
 	encoder1: &mut Option<Box<dyn Encoder>>,
 	encoder2: &mut Option<Box<dyn Encoder>>,
 ) -> io::Result<()> {
-	let mut buf = [0; 1024];
-	loop {
-		let len = read(stream1, encoder1, &mut buf).await?;
-		if len == 0 {
-			break;
-		}
-		write_all(stream2, encoder2, &buf[..len]).await?
+	let mut buf = [0; 2048];
+	let len = read(stream1, encoder1, &mut buf).await?;
+	if len == 0 {
+		return Err(io::Error::from(io::ErrorKind::BrokenPipe));
 	}
+	write_all(stream2, encoder2, &buf[..len]).await?;
 	Ok(())
 }
 
@@ -237,7 +234,7 @@ async fn handle(mut stream: TcpStream, mut encoder: Option<Box<dyn Encoder>>) ->
 	}
 
 	println!("incoming socket, request upstream: {:?}", addr);
-	let up_stream = match TcpStream::connect(addr).await {
+	let mut up_stream = match TcpStream::connect(addr).await {
 		Ok(s) => s,
 		Err(e) => {
 			println!("Upstream connect failed, {}", e);
@@ -263,17 +260,27 @@ async fn handle(mut stream: TcpStream, mut encoder: Option<Box<dyn Encoder>>) ->
 
 	let mut encoder2 = None;
 	let mut encoder4 = encoder.as_ref().map(|e| e.clone());
-	tokio::spawn(async move {
-		copy(&mut ro, &mut wi, &mut encoder2, &mut encoder4)
-			.await
-			.unwrap();
-	});
-
 	let mut encoder1 = encoder.as_ref().map(|e| e.clone());
 	let mut encoder3 = None;
-	copy(&mut ri, &mut wo, &mut encoder1, &mut encoder3)
-		.await
-		.unwrap();
+
+	loop {
+		tokio::select! {
+			_ = ro.readable() => {
+				if (copy(&mut ro, &mut wi, &mut encoder2, &mut encoder4)
+					.await).is_err() {
+						break
+					}
+			},
+			_ = ri.readable() => {
+				if (copy(&mut ri, &mut wo, &mut encoder1, &mut encoder3)
+				.await).is_err() {
+					break;
+				}
+			}
+		}
+	}
+
+	
 	return Ok(());
 }
 
